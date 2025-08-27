@@ -156,7 +156,7 @@ def tampilkan_peta(df: pd.DataFrame):
         "Batang Hari":           (-1.70, 103.08),
         "Bungo":                 (-1.60, 102.13),
         "Kerinci":               (-2.18, 101.50),
-        "Merangin":              (-2.08, 102.27),
+        "Merangin":              (-2.08, 101.4747),
         "Muaro Jambi":           (-1.73, 103.61),
         "Sarolangun":            (-2.30, 102.70),
         "Tanjung Jabung Barat":  (-0.79, 103.46),
@@ -243,10 +243,6 @@ def tampilkan_peta(df: pd.DataFrame):
                             icon=folium.Icon(color="red", icon="info-sign")
                         ).add_to(m)
                         shown += 1
-                st.caption(
-                    f"Menampilkan {shown} titik dalam radius {st.session_state.get('radius_km', radius_km)} km "
-                    f"dari pusat {tuple(round(x, 5) for x in st.session_state['fix_center'])}"
-                )
             else:
                 st.info("Klik **Tampilkan Data** untuk memfilter titik berdasarkan radius dari pusat terpilih.")
         else:
