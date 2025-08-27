@@ -206,25 +206,4 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         use_container_width=True
     )
 
-    # 6b) Excel
-    buf_xlsx = BytesIO()
-    excel_ok = False
-    for eng in ("openpyxl", "xlsxwriter"):
-        try:
-            with pd.ExcelWriter(buf_xlsx, engine=eng) as writer:
-                out.to_excel(writer, index=False, sheet_name="Rekap")
-            excel_ok = True
-            break
-        except Exception:
-            buf_xlsx = BytesIO()
-            continue
-    if excel_ok:
-        st.download_button(
-            "⬇️ Unduh Excel",
-            data=buf_xlsx.getvalue(),
-            file_name=f"{stem}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-    
+   
