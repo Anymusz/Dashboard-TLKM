@@ -15,7 +15,6 @@ section[data-testid="stSidebar"]{width:360px !important}
 </style>
 """, unsafe_allow_html=True)
 
-# Ubah judul utama
 st.title("Dashboard Analisis Kendala Operasional Telkom")
 
 # ---------- Util tambahan ----------
