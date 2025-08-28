@@ -142,19 +142,6 @@ with st.sidebar:
 
     page = st.radio("Pilih halaman", ["🗺️ Peta", "📊 Rekap", "🧾 Data mentah"], index=0)
 
-    if "data" in st.session_state:
-        df_side = st.session_state["data"]
-        with st.expander("🧠 Ringkasan data", expanded=True):
-            n_rows, n_cols = df_side.shape
-            c1, c2 = st.columns(2)
-            c1.metric("Baris", _fmt_int(n_rows))
-            c2.metric("Kolom", _fmt_int(n_cols))
-            tcol = _detect_date_col(df_side.columns)
-            if tcol:
-                dates = pd.to_datetime(df_side[tcol], errors="coerce").dropna()
-                if not dates.empty:
-                    st.caption(f"Rentang tanggal: **{dates.min().strftime('%m-%d-%Y')} – {dates.max().strftime('%m-%d-%Y')}**")
-
 # ---------- Konten utama ----------
 if "data" not in st.session_state:
     st.info("Silakan upload file CSV di sidebar.")
