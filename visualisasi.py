@@ -1,15 +1,12 @@
-# visualisasi.py — Rekap Historis (Harian/Mingguan) + opsi tampilan + DOWNLOAD
+# visualisasi.py — Rekap Historis (Harian/Mingguan) + opsi tampilan + DOWNLOAD (kontrol di sidebar)
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.io as pio
-from io import BytesIO
 
-DATE_FMT = "%m-%d-%Y"  # tampilan tanggal MM-DD-YYYY
+DATE_FMT = "%m-%d-%Y"
 
 def _detect_date_col(columns):
-    """Deteksi nama kolom tanggal secara fleksibel."""
     for c in columns:
         lc = str(c).strip().lower()
         if lc in ("tanggal", "tgl", "date", "waktu") or "tanggal" in lc or "date" in lc:
@@ -17,14 +14,12 @@ def _detect_date_col(columns):
     return None
 
 def _zscore_outliers(s: pd.Series, win: int = 7, z_thr: float = 2.0) -> pd.Series:
-    """Tandai lonjakan (outlier) pakai z-score rolling."""
     roll_mean = s.rolling(win, min_periods=win).mean()
     roll_std  = s.rolling(win, min_periods=win).std()
     z = (s - roll_mean) / roll_std
     return (roll_std > 0) & (z > z_thr)
 
 def _fmt(n: float) -> str:
-    """Format angka dengan pemisah ribuan gaya ID (titik)."""
     try:
         return f"{int(n):,}".replace(",", ".")
     except Exception:
@@ -33,7 +28,7 @@ def _fmt(n: float) -> str:
 def tampilkan_visualisasi(df: pd.DataFrame):
     st.subheader("Rekap Historis — Harian / Mingguan")
 
-    # ---------- 1) Siapkan data harian ----------
+    # ---------- siapkan data harian ----------
     df = df.copy()
     df.columns = df.columns.str.strip()
 
@@ -43,8 +38,7 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         st.write("Kolom tersedia:", df.columns.tolist())
         return
 
-    df[tgl_col] = pd.to_datetime(df[tgl_col], errors="coerce")
-    df[tgl_col] = df[tgl_col].dt.tz_localize(None)
+    df[tgl_col] = pd.to_datetime(df[tgl_col], errors="coerce").dt.tz_localize(None)
     df = df.dropna(subset=[tgl_col])
 
     y_daily = (
@@ -57,33 +51,20 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         st.info("Tidak ada data untuk ditampilkan.")
         return
 
-    # ---------- 2) Pengaturan (bahasa sederhana) ----------
-    st.markdown("### Pengaturan")
-    col_mode, col_opts = st.columns([1, 2])
+    # ====== SIDEBAR ======
+    with st.sidebar:
+        st.markdown("### ⚙️ Pengaturan Visualisasi")
 
-    with col_mode:
-        mode = st.radio("Pilih mode", ["Harian", "Mingguan"], horizontal=True)
+        mode = st.radio("Mode rekap", ["Harian", "Mingguan"], horizontal=True, key="viz_mode")
 
-    # label dibuat ringkas & mudah
-    opsi_semua = ["Titik data", "Garis median", "Tandai lonjakan", "Mode gelap"]
-    with col_opts:
-        dipilih = st.multiselect(
-            "Tampilan grafik",
-            opsi_semua,
-            default=opsi_semua,
-            help="Atur cara grafik ditampilkan."
-        )
+        opsi_semua = ["Titik data", "Garis median", "Tandai lonjakan", "Mode gelap"]
+        dipilih = st.multiselect("Tampilan grafik", opsi_semua, default=opsi_semua, key="viz_opts")
 
-    show_points     = "Titik data" in dipilih
-    show_median     = "Garis median" in dipilih
-    highlight_spike = "Tandai lonjakan" in dipilih
-    dark            = "Mode gelap" in dipilih
-
-    col_from, col_to = st.columns(2)
-    with col_from:
-        start_date = st.date_input("Dari", value=y_daily.index.min().date())
-    with col_to:
-        end_date = st.date_input("Sampai", value=y_daily.index.max().date())
+        col_from, col_to = st.columns(2)
+        with col_from:
+            start_date = st.date_input("Dari", value=y_daily.index.min().date(), key="viz_from")
+        with col_to:
+            end_date = st.date_input("Sampai", value=y_daily.index.max().date(), key="viz_to")
 
     if pd.to_datetime(start_date) > pd.to_datetime(end_date):
         st.warning("Tanggal mulai harus sebelum tanggal akhir.")
@@ -91,7 +72,13 @@ def tampilkan_visualisasi(df: pd.DataFrame):
 
     y_daily = y_daily.loc[str(start_date):str(end_date)]
 
-    # ---------- 3) Angka ringkas ----------
+    # opsi
+    show_points     = "Titik data" in st.session_state["viz_opts"]
+    show_median     = "Garis median" in st.session_state["viz_opts"]
+    highlight_spike = "Tandai lonjakan" in st.session_state["viz_opts"]
+    dark            = "Mode gelap" in st.session_state["viz_opts"]
+
+    # ---------- angka ringkas ----------
     last_val = int(y_daily.iloc[-1]) if len(y_daily) else 0
     prev_val = int(y_daily.iloc[-2]) if len(y_daily) > 1 else 0
     last7 = int(y_daily.tail(7).sum()) if len(y_daily) else 0
@@ -108,7 +95,7 @@ def tampilkan_visualisasi(df: pd.DataFrame):
     m4.metric("Tertinggi di periode", _fmt(top_val),
               top_day.strftime(DATE_FMT) if top_day is not None else "-")
 
-    # ---------- 4) Pilih seri sesuai mode ----------
+    # ---------- seri sesuai mode ----------
     if mode == "Harian":
         x = y_daily.index
         y = y_daily.values
@@ -117,7 +104,7 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         median_val = np.median(y_daily.values)
         spikes_mask = _zscore_outliers(y_daily) if highlight_spike else pd.Series(False, index=y_daily.index)
     else:
-        weekly = y_daily.resample("W-MON").sum().rename("total_mingguan")  # minggu berakhir Senin
+        weekly = y_daily.resample("W-MON").sum().rename("total_mingguan")
         weekly = weekly.loc[str(start_date):str(end_date)]
         x = weekly.index
         y = weekly.values
@@ -126,7 +113,7 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         median_val = np.median(weekly.values) if len(weekly) else 0
         spikes_mask = _zscore_outliers(weekly) if highlight_spike else pd.Series(False, index=weekly.index)
 
-    # ---------- 5) Grafik ----------
+    # ---------- grafik ----------
     template = "plotly_dark" if dark else "plotly_white"
     fig = go.Figure()
 
@@ -141,8 +128,7 @@ def tampilkan_visualisasi(df: pd.DataFrame):
     if show_median and len(y) > 0:
         fig.add_hline(
             y=median_val, line_width=1, line_dash="dot",
-            annotation_text=f"Median ~ {median_val:.0f}",
-            annotation_position="top left"
+            annotation_text=f"Median ~ {median_val:.0f}", annotation_position="top left"
         )
 
     if highlight_spike and spikes_mask.any():
@@ -150,40 +136,28 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         ys = np.array(y)[spikes_mask.values]
         fig.add_trace(go.Scatter(
             x=xs, y=ys, name="Lonjakan",
-            mode="markers",
-            marker=dict(size=8, symbol="diamond-open"),
+            mode="markers", marker=dict(size=8, symbol="diamond-open"),
             hovertemplate=hover
         ))
 
     if len(y) > 0:
-        peak_idx = int(np.argmax(y))
-        peak_x, peak_y = x[peak_idx], y[peak_idx]
-        fig.add_trace(go.Scatter(
-            x=[peak_x], y=[peak_y],
-            mode="markers", name="Puncak",
-            marker=dict(size=9, symbol="star", line=dict(width=0))
-        ))
-        fig.add_annotation(
-            x=peak_x, y=peak_y,
-            text=f"Puncak: {_fmt(peak_y)}",
-            showarrow=True, arrowhead=2, yshift=12
-        )
+        peak_idx = int(np.argmax(y)); peak_x, peak_y = x[peak_idx], y[peak_idx]
+        fig.add_trace(go.Scatter(x=[peak_x], y=[peak_y], mode="markers",
+                                 name="Puncak", marker=dict(size=9, symbol="star", line=dict(width=0))))
+        fig.add_annotation(x=peak_x, y=peak_y, text=f"Puncak: {_fmt(peak_y)}",
+                           showarrow=True, arrowhead=2, yshift=12)
 
     fig.update_layout(
         template=template,
         title=dict(text=f"{title} (Rekap {pd.to_datetime(start_date).strftime(DATE_FMT)} – {pd.to_datetime(end_date).strftime(DATE_FMT)})", x=0.5),
-        xaxis=dict(title="Tanggal", tickformat="%m-%d-%Y",
-                   showgrid=True, gridcolor="rgba(128,128,128,0.15)",
-                   rangeslider=dict(visible=False)),
-        yaxis=dict(title="Jumlah",
-                   showgrid=True, gridcolor="rgba(128,128,128,0.15)"),
+        xaxis=dict(title="Tanggal", tickformat="%m-%d-%Y", showgrid=True, gridcolor="rgba(128,128,128,0.15)"),
+        yaxis=dict(title="Jumlah", showgrid=True, gridcolor="rgba(128,128,128,0.15)"),
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0)
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
-    # ---------- 6) Tabel ringkas + UNDUH ----------
+    # ---------- tabel + unduh ----------
     if mode == "Harian":
         out = pd.DataFrame({"Tanggal": pd.Index(x).strftime(DATE_FMT), "Jumlah": y})
     else:
@@ -191,19 +165,9 @@ def tampilkan_visualisasi(df: pd.DataFrame):
 
     st.dataframe(out, use_container_width=True)
 
-    # === Tombol download ===
     start_str = pd.to_datetime(start_date).strftime(DATE_FMT)
     end_str   = pd.to_datetime(end_date).strftime(DATE_FMT)
     stem = f"rekap_{'harian' if mode=='Harian' else 'mingguan'}_{start_str}_sd_{end_str}"
 
-    # 6a) CSV
     csv_bytes = out.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "⬇️ Unduh CSV",
-        data=csv_bytes,
-        file_name=f"{stem}.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-
-   
+    st.download_button("⬇️ Unduh CSV", data=csv_bytes, file_name=f"{stem}.csv", mime="text/csv", use_container_width=True)
