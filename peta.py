@@ -1,16 +1,17 @@
-# peta.py — semua kontrol Peta di sidebar
+# peta.py — semua kontrol Peta di sidebar + opsi "jangan rerun saat gerak peta"
 import re
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import HeatMap, MarkerCluster
 import streamlit as st
+import streamlit.components.v1 as components
 from math import radians, sin, cos, sqrt, atan2
 
 # ---------- util geo ----------
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371.0
-    dlat = radians(lat2 - lat1); dlon = radians(lat2 - lon1)
+    dlat = radians(lat2 - lat1); dlon = radians(lon2 - lon1)
     a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
     return 2 * R * atan2(sqrt(a), sqrt(1-a))
 
@@ -119,6 +120,7 @@ def tampilkan_peta(df: pd.DataFrame):
         }
         opt_center = st.selectbox("Pilih Kabupaten/Kota", ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()), index=0, key="map_center")
         radius_km  = st.slider("Radius (km)", 5, 200, 50, step=5, key="map_radius_km")
+        no_rerun   = st.checkbox("Jangan rerun saat gerak peta", value=True, key="map_quiet")
         col_btn_a, col_btn_b = st.columns(2)
         with col_btn_a:
             apply_btn = st.button("Terapkan filter", key="map_apply")
@@ -132,6 +134,8 @@ def tampilkan_peta(df: pd.DataFrame):
         st.session_state["fix_center"] = (center_lat, center_lon)
     if "show_filtered" not in st.session_state:
         st.session_state["show_filtered"] = False
+    if "radius_km" not in st.session_state:
+        st.session_state["radius_km"] = radius_km
 
     # terapkan pilihan pusat
     if opt_center != "(Gunakan tengah data)":
@@ -157,7 +161,7 @@ def tampilkan_peta(df: pd.DataFrame):
         st.session_state["radius_km"] = 50
 
     # ====== render peta ======
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start, width="100%", height=500)
 
     subset_cols = [lat_col, lon_col]
     for c in [tgl_col, status_col, sto_col, sektor_col]:
@@ -168,7 +172,7 @@ def tampilkan_peta(df: pd.DataFrame):
         data_plot = data_valid
         if st.session_state["show_filtered"]:
             fc_lat, fc_lon = st.session_state["fix_center"]
-            deg = st.session_state.get("radius_km", radius_km) / 111.0
+            deg = st.session_state["radius_km"] / 111.0
             data_plot = data_plot[
                 (data_plot[lat_col].between(fc_lat - deg, fc_lat + deg)) &
                 (data_plot[lon_col].between(fc_lon - deg, fc_lon + deg))
@@ -179,7 +183,7 @@ def tampilkan_peta(df: pd.DataFrame):
             if st.session_state["show_filtered"]:
                 jarak = haversine(st.session_state["fix_center"][0], st.session_state["fix_center"][1],
                                   row[lat_col], row[lon_col])
-                if jarak > st.session_state.get("radius_km", radius_km): 
+                if jarak > st.session_state["radius_km"]:
                     continue
             tanggal_val = row.get(tgl_col, "N/A") if tgl_col else "N/A"
             status_val  = row.get(status_col, "Tidak ada") if status_col else "Tidak ada"
@@ -200,7 +204,7 @@ def tampilkan_peta(df: pd.DataFrame):
 
         if st.session_state["show_filtered"]:
             st.caption(
-                f"Menampilkan {shown} titik dalam radius {st.session_state.get('radius_km', radius_km)} km "
+                f"Menampilkan {shown} titik dalam radius {st.session_state['radius_km']} km "
                 f"dari pusat {tuple(round(x, 5) for x in st.session_state['fix_center'])}"
             )
         else:
@@ -213,4 +217,9 @@ def tampilkan_peta(df: pd.DataFrame):
         else:
             st.warning("Tidak ada data koordinat valid untuk Heatmap.")
 
-    st_folium(m, width=900, height=500, key="map_main")
+    # ====== output: non-rerun HTML atau st_folium ======
+    if no_rerun:
+        html = m.get_root().render()
+        components.html(html, height=500, scrolling=False)
+    else:
+        st_folium(m, width=900, height=500, key="map_main")
