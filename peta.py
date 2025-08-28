@@ -1,4 +1,4 @@
-# peta.py — semua pengaturan di sidebar
+# peta.py — semua kontrol Peta di sidebar
 import re
 import pandas as pd
 import folium
@@ -10,7 +10,7 @@ from math import radians, sin, cos, sqrt, atan2
 # ---------- util geo ----------
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371.0
-    dlat = radians(lat2 - lat1); dlon = radians(lon2 - lon1)
+    dlat = radians(lat2 - lat1); dlon = radians(lat2 - lon1)
     a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
     return 2 * R * atan2(sqrt(a), sqrt(1-a))
 
@@ -107,23 +107,33 @@ def tampilkan_peta(df: pd.DataFrame):
     df[lat_col] = pd.to_numeric(df[lat_col], errors="coerce")
     df[lon_col] = pd.to_numeric(df[lon_col], errors="coerce")
 
-    center_lat = df[lat_col].mean(); center_lon = df[lon_col].mean()
-    zoom_start = 7
-
-    # ====== SIDEBAR: pengaturan peta ======
+    # ====== SIDEBAR: kontrol khusus halaman Peta ======
     with st.sidebar:
         st.markdown("### ⚙️ Pengaturan Peta")
-        vis_mode = st.radio("Tampilan", ["Titik dengan Profil", "Heatmap"], horizontal=True)
+        vis_mode = st.radio("Tampilan", ["Titik dengan Profil", "Heatmap"], horizontal=True, key="map_vis_mode")
         kabupaten_coords = {
             "Batang Hari": (-1.70, 103.08), "Bungo": (-1.60, 102.13), "Kerinci": (-2.18, 101.50),
             "Merangin": (-2.08, 101.4747), "Muaro Jambi": (-1.73, 103.61), "Sarolangun": (-2.30, 102.70),
             "Tanjung Jabung Barat": (-0.79, 103.46), "Tanjung Jabung Timur": (-1.20, 103.90),
             "Tebo": (-1.490917, 102.445194), "Kota Jambi": (-1.61, 103.61), "Kota Sungai Penuh": (-2.06, 101.39),
         }
-        opt_center = st.selectbox("Pusat peta", ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()), index=0)
-        radius_km  = st.slider("Radius filter (km)", 5, 200, 50, step=5, key="radius_km")
-        apply_btn  = st.button("Terapkan filter peta", key="btn_show_map")
+        opt_center = st.selectbox("Pilih Kabupaten/Kota", ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()), index=0, key="map_center")
+        radius_km  = st.slider("Radius (km)", 5, 200, 50, step=5, key="map_radius_km")
+        col_btn_a, col_btn_b = st.columns(2)
+        with col_btn_a:
+            apply_btn = st.button("Terapkan filter", key="map_apply")
+        with col_btn_b:
+            reset_btn = st.button("Reset", key="map_reset")
 
+    # state awal
+    center_lat = df[lat_col].mean(); center_lon = df[lon_col].mean()
+    zoom_start = 7
+    if "fix_center" not in st.session_state:
+        st.session_state["fix_center"] = (center_lat, center_lon)
+    if "show_filtered" not in st.session_state:
+        st.session_state["show_filtered"] = False
+
+    # terapkan pilihan pusat
     if opt_center != "(Gunakan tengah data)":
         center_lat, center_lon = kabupaten_coords[opt_center]
         radius_deg = 0.5
@@ -131,38 +141,46 @@ def tampilkan_peta(df: pd.DataFrame):
                     (df[lon_col].between(center_lon - radius_deg, center_lon + radius_deg))]
         n_points = len(nearby)
         zoom_start = 13 if n_points > 1000 else 12 if n_points > 200 else 11 if n_points > 50 else 10
+    else:
+        center_lat = df[lat_col].mean()
+        center_lon = df[lon_col].mean()
+        zoom_start = 7
 
+    # tombol
     if apply_btn:
         st.session_state["fix_center"] = (center_lat, center_lon)
         st.session_state["show_filtered"] = True
-    if "fix_center" not in st.session_state:
-        st.session_state["fix_center"] = (center_lat, center_lon)
-    if "show_filtered" not in st.session_state:
+        st.session_state["radius_km"] = radius_km
+    if reset_btn:
+        st.session_state["fix_center"] = (df[lat_col].mean(), df[lon_col].mean())
         st.session_state["show_filtered"] = False
+        st.session_state["radius_km"] = 50
 
-    # ====== render ======
+    # ====== render peta ======
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
+
     subset_cols = [lat_col, lon_col]
     for c in [tgl_col, status_col, sto_col, sektor_col]:
         if c: subset_cols.append(c)
     data_valid = df[subset_cols].dropna(subset=[lat_col, lon_col])
 
     if vis_mode == "Titik dengan Profil":
-        # jika filter aktif batasi radius
+        data_plot = data_valid
         if st.session_state["show_filtered"]:
             fc_lat, fc_lon = st.session_state["fix_center"]
             deg = st.session_state.get("radius_km", radius_km) / 111.0
-            data_valid = data_valid[
-                (data_valid[lat_col].between(fc_lat - deg, fc_lat + deg)) &
-                (data_valid[lon_col].between(fc_lon - deg, fc_lon + deg))
+            data_plot = data_plot[
+                (data_plot[lat_col].between(fc_lat - deg, fc_lat + deg)) &
+                (data_plot[lon_col].between(fc_lon - deg, fc_lon + deg))
             ]
         cluster = MarkerCluster().add_to(m)
         shown = 0
-        for _, row in data_valid.iterrows():
+        for _, row in data_plot.iterrows():
             if st.session_state["show_filtered"]:
                 jarak = haversine(st.session_state["fix_center"][0], st.session_state["fix_center"][1],
                                   row[lat_col], row[lon_col])
-                if jarak > st.session_state.get("radius_km", radius_km): continue
+                if jarak > st.session_state.get("radius_km", radius_km): 
+                    continue
             tanggal_val = row.get(tgl_col, "N/A") if tgl_col else "N/A"
             status_val  = row.get(status_col, "Tidak ada") if status_col else "Tidak ada"
             sto_val     = row.get(sto_col, "N/A") if sto_col else "N/A"
@@ -179,8 +197,12 @@ def tampilkan_peta(df: pd.DataFrame):
                           popup=popup_html,
                           icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
             shown += 1
+
         if st.session_state["show_filtered"]:
-            st.caption(f"Menampilkan {shown} titik dalam radius {st.session_state.get('radius_km', radius_km)} km.")
+            st.caption(
+                f"Menampilkan {shown} titik dalam radius {st.session_state.get('radius_km', radius_km)} km "
+                f"dari pusat {tuple(round(x, 5) for x in st.session_state['fix_center'])}"
+            )
         else:
             st.caption(f"Menampilkan {shown} titik.")
     else:
