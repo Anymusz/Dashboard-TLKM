@@ -60,10 +60,6 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         opsi_semua = ["Titik data", "Garis median", "Tandai lonjakan", "Mode gelap"]
         dipilih = st.multiselect("Tampilan grafik", opsi_semua, default=opsi_semua, key="viz_opts")
 
-        # kalau semua opsi dipilih → tampilkan teks ringkas
-        if set(dipilih) == set(opsi_semua):
-            st.caption("✅ Semua opsi tampilan aktif")
-
         col_from, col_to = st.columns(2)
         with col_from:
             start_date = st.date_input("Dari", value=y_daily.index.min().date(), key="viz_from")
@@ -77,10 +73,10 @@ def tampilkan_visualisasi(df: pd.DataFrame):
     y_daily = y_daily.loc[str(start_date):str(end_date)]
 
     # opsi
-    show_points     = "Titik data" in dipilih
-    show_median     = "Garis median" in dipilih
-    highlight_spike = "Tandai lonjakan" in dipilih
-    dark            = "Mode gelap" in dipilih
+    show_points     = "Titik data" in st.session_state["viz_opts"]
+    show_median     = "Garis median" in st.session_state["viz_opts"]
+    highlight_spike = "Tandai lonjakan" in st.session_state["viz_opts"]
+    dark            = "Mode gelap" in st.session_state["viz_opts"]
 
     # ---------- angka ringkas ----------
     last_val = int(y_daily.iloc[-1]) if len(y_daily) else 0
