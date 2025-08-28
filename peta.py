@@ -149,13 +149,6 @@ def tampilkan_peta(df: pd.DataFrame):
                           icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
             shown += 1
         st.caption(f"Menampilkan {shown} titik.")
-    else:
-        heat_data = data_valid[[lat_col, lon_col]].values.tolist()
-        if heat_data:
-            HeatMap(heat_data, radius=15, blur=10, max_zoom=1).add_to(m)
-            st.info(f"Total titik pada peta: **{len(heat_data)}**")
-        else:
-            st.warning("Tidak ada data koordinat valid untuk Heatmap.")
 
     # tampilkan HTML folium statis → tidak rerun saat drag/zoom
     html = m.get_root().render()
