@@ -1,4 +1,4 @@
-# visualisasi.py — Rekap Historis (Harian/Mingguan) + opsi tampilan + DOWNLOAD (kontrol di sidebar)
+# visualisasi.py — Rekap Historis (Harian/Mingguan) + opsi tampilan + DOWNLOAD (kontrol di sidebar, UI rapi)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -57,8 +57,27 @@ def tampilkan_visualisasi(df: pd.DataFrame):
 
         mode = st.radio("Mode rekap", ["Harian", "Mingguan"], horizontal=True, key="viz_mode")
 
-        opsi_semua = ["Titik data", "Garis median", "Tandai lonjakan", "Mode gelap"]
-        dipilih = st.multiselect("Tampilan grafik", opsi_semua, default=opsi_semua, key="viz_opts")
+        st.markdown("**Tampilan grafik**")
+        # tombol cepat
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Pilih semua"):
+                st.session_state.opt_points = True
+                st.session_state.opt_median = True
+                st.session_state.opt_spike  = True
+                st.session_state.opt_dark   = False
+        with c2:
+            if st.button("Hapus semua"):
+                st.session_state.opt_points = False
+                st.session_state.opt_median = False
+                st.session_state.opt_spike  = False
+                st.session_state.opt_dark   = False
+
+        # checkbox yang rapi
+        show_points     = st.checkbox("Titik data", value=st.session_state.get("opt_points", True), key="opt_points")
+        show_median     = st.checkbox("Garis median", value=st.session_state.get("opt_median", True), key="opt_median")
+        highlight_spike = st.checkbox("Tandai lonjakan", value=st.session_state.get("opt_spike", True), key="opt_spike")
+        dark            = st.toggle("Mode gelap", value=st.session_state.get("opt_dark", False), key="opt_dark")
 
         col_from, col_to = st.columns(2)
         with col_from:
@@ -71,12 +90,6 @@ def tampilkan_visualisasi(df: pd.DataFrame):
         return
 
     y_daily = y_daily.loc[str(start_date):str(end_date)]
-
-    # opsi
-    show_points     = "Titik data" in st.session_state["viz_opts"]
-    show_median     = "Garis median" in st.session_state["viz_opts"]
-    highlight_spike = "Tandai lonjakan" in st.session_state["viz_opts"]
-    dark            = "Mode gelap" in st.session_state["viz_opts"]
 
     # ---------- angka ringkas ----------
     last_val = int(y_daily.iloc[-1]) if len(y_daily) else 0
