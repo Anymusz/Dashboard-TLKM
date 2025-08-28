@@ -102,7 +102,7 @@ def tampilkan_peta(df: pd.DataFrame):
     # ====== SIDEBAR ======
     with st.sidebar:
         st.markdown("### ⚙️ Pengaturan Peta")
-        vis_mode = st.radio("Tampilan", ["Titik dengan Profil"], horizontal=True, key="map_vis_mode")
+        # vis_mode = st.radio("Tampilan", ["Titik dengan Profil"], horizontal=True, key="map_vis_mode")
         kabupaten_coords = {
             "Batang Hari": (-1.70, 103.08), "Bungo": (-1.60, 102.13), "Kerinci": (-2.18, 101.50),
             "Merangin": (-2.08, 101.4747), "Muaro Jambi": (-1.73, 103.61), "Sarolangun": (-2.30, 102.70),
