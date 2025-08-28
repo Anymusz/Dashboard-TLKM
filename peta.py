@@ -1,8 +1,8 @@
-# peta.py — semua kontrol Peta di sidebar (tanpa radius, tanpa tombol apply/reset, no-rerun)
+# peta.py — kontrol di sidebar (tanpa radius, tanpa apply/reset, tanpa opsi tampilan, no-rerun)
 import re
 import pandas as pd
 import folium
-from folium.plugins import HeatMap, MarkerCluster
+from folium.plugins import MarkerCluster
 import streamlit as st
 
 # ---------- util geo ----------
@@ -46,7 +46,6 @@ def _parse_coord_cell(txt):
     return (None, None)
 
 def _pick_col_fuzzy(df, want="lat"):
-    cols = list(df.columns)
     candidates_exact = {
         "lat": ["lat", "latitude", "y", "koordinat_y", "coord_y"],
         "lon": ["lon", "longitude", "lng", "long", "x", "koordinat_x", "coord_x"],
@@ -54,7 +53,7 @@ def _pick_col_fuzzy(df, want="lat"):
     for c in candidates_exact[want]:
         if c in df.columns: return c
     pattern = r"lat" if want == "lat" else r"lon|lng|long"
-    for c in cols:
+    for c in df.columns:
         if re.search(pattern, c): return c
     if want == "lat" and "y" in df.columns: return "y"
     if want == "lon" and "x" in df.columns: return "x"
@@ -92,9 +91,7 @@ def tampilkan_peta(df: pd.DataFrame):
     sektor_col = next((c for c in df.columns if "sektor" in c or "sector" in c), None)
 
     if not lat_col or not lon_col:
-        st.warning("Tidak ada lat/lon yang valid.")
-        st.dataframe(df.head(10))
-        return
+        st.warning("Tidak ada lat/lon yang valid."); st.dataframe(df.head(10)); return
 
     df[lat_col] = pd.to_numeric(df[lat_col], errors="coerce")
     df[lon_col] = pd.to_numeric(df[lon_col], errors="coerce")
@@ -102,54 +99,51 @@ def tampilkan_peta(df: pd.DataFrame):
     # ====== SIDEBAR ======
     with st.sidebar:
         st.markdown("### ⚙️ Pengaturan Peta")
-        vis_mode = st.radio("Tampilan", ["Titik dengan Profil"], horizontal=True, key="map_vis_mode")
         kabupaten_coords = {
             "Batang Hari": (-1.70, 103.08), "Bungo": (-1.60, 102.13), "Kerinci": (-2.18, 101.50),
             "Merangin": (-2.08, 101.4747), "Muaro Jambi": (-1.73, 103.61), "Sarolangun": (-2.30, 102.70),
             "Tanjung Jabung Barat": (-0.79, 103.46), "Tanjung Jabung Timur": (-1.20, 103.90),
             "Tebo": (-1.490917, 102.445194), "Kota Jambi": (-1.61, 103.61), "Kota Sungai Penuh": (-2.06, 101.39),
         }
-        opt_center = st.selectbox("Pilih Kabupaten/Kota", ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()), index=0, key="map_center")
+        opt_center = st.selectbox("Pilih Kabupaten/Kota",
+                                  ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()),
+                                  index=0, key="map_center")
 
     # ====== CENTER & ZOOM ======
     if opt_center != "(Gunakan tengah data)":
-        center_lat, center_lon = kabupaten_coords[opt_center]
-        zoom_start = 11
+        center_lat, center_lon = kabupaten_coords[opt_center]; zoom_start = 11
     else:
-        center_lat = df[lat_col].mean()
-        center_lon = df[lon_col].mean()
-        zoom_start = 7
+        center_lat = df[lat_col].mean(); center_lon = df[lon_col].mean(); zoom_start = 7
 
-    # ====== render peta ======
+    # ====== render peta: MarkerCluster selalu ======
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
-
     subset_cols = [lat_col, lon_col]
     for c in [tgl_col, status_col, sto_col, sektor_col]:
         if c: subset_cols.append(c)
     data_valid = df[subset_cols].dropna(subset=[lat_col, lon_col])
 
-    if vis_mode == "Titik dengan Profil":
-        cluster = MarkerCluster().add_to(m)
-        shown = 0
-        for _, row in data_valid.iterrows():
-            tanggal_val = row.get(tgl_col, "N/A") if tgl_col else "N/A"
-            status_val  = row.get(status_col, "Tidak ada") if status_col else "Tidak ada"
-            sto_val     = row.get(sto_col, "N/A") if sto_col else "N/A"
-            sektor_val  = row.get(sektor_col, "N/A") if sektor_col else "N/A"
-            popup_html = (
-                "<div style='font-size:12px'>"
-                f"<b>Tanggal:</b> {tanggal_val}<br>"
-                f"<b>Status:</b> {status_val}<br>"
-                f"<b>STO:</b> {sto_val}<br>"
-                f"<b>Sektor:</b> {sektor_val}"
-                "</div>"
-            )
-            folium.Marker([row[lat_col], row[lon_col]],
-                          popup=popup_html,
-                          icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
-            shown += 1
-        st.caption(f"Menampilkan {shown} titik.")
+    cluster = MarkerCluster().add_to(m)
+    shown = 0
+    for _, row in data_valid.iterrows():
+        tanggal_val = row.get(tgl_col, "N/A") if tgl_col else "N/A"
+        status_val  = row.get(status_col, "Tidak ada") if status_col else "Tidak ada"
+        sto_val     = row.get(sto_col, "N/A") if sto_col else "N/A"
+        sektor_val  = row.get(sektor_col, "N/A") if sektor_col else "N/A"
+        popup_html = (
+            "<div style='font-size:12px'>"
+            f"<b>Tanggal:</b> {tanggal_val}<br>"
+            f"<b>Status:</b> {status_val}<br>"
+            f"<b>STO:</b> {sto_val}<br>"
+            f"<b>Sektor:</b> {sektor_val}"
+            "</div>"
+        )
+        folium.Marker([row[lat_col], row[lon_col]],
+                      popup=popup_html,
+                      icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
+        shown += 1
 
-    # tampilkan HTML folium statis → tidak rerun saat drag/zoom
+    st.caption(f"Menampilkan {shown} titik.")
+
+    # HTML folium statis → drag/zoom tidak memicu rerun
     html = m.get_root().render()
     st.components.v1.html(html, height=600, scrolling=False)
