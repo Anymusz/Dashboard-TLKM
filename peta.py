@@ -1,4 +1,4 @@
-# peta.py — semua kontrol Peta di sidebar + opsi "jangan rerun saat gerak peta"
+# peta.py — kontrol peta di sidebar + pusat kabupaten + filter STO/Sektor/Kabupaten + opsi non-rerun
 import re
 import pandas as pd
 import folium
@@ -11,7 +11,7 @@ from math import radians, sin, cos, sqrt, atan2
 # ---------- util geo ----------
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371.0
-    dlat = radians(lat2 - lat1); dlon = radians(lon2 - lon1)
+    dlat = radians(lat2 - lat1); dlon = radians(lat2 - lon1)
     a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
     return 2 * R * atan2(sqrt(a), sqrt(1-a))
 
@@ -69,6 +69,14 @@ def _pick_col_fuzzy(df, want="lat"):
     if want == "lon" and "x" in df.columns: return "x"
     return None
 
+# deteksi kolom kabupaten/kota pada DATA (untuk filter data, bukan pusat peta)
+def _pick_kab_col(df):
+    for c in df.columns:
+        lc = str(c).lower()
+        if any(k in lc for k in ["kabupaten", "kab.", "kab ", "kota", "kotamadya", "municip", "region"]):
+            return c
+    return None
+
 # ---------- UI ----------
 def tampilkan_peta(df: pd.DataFrame):
     st.subheader("Peta Interaktif")
@@ -99,6 +107,7 @@ def tampilkan_peta(df: pd.DataFrame):
     status_col = next((c for c in df.columns if c in ["status sc","status_sc","status","keterangan","info"] or "status" in c), None)
     sto_col    = next((c for c in df.columns if c == "sto" or "sto" in c), None)
     sektor_col = next((c for c in df.columns if c in ["sektor","sector"] or "sektor" in c or "sector" in c), None)
+    kab_data_col = _pick_kab_col(df)
 
     if not lat_col or not lon_col:
         st.warning("Tidak ada lat/lon yang valid.")
@@ -112,15 +121,40 @@ def tampilkan_peta(df: pd.DataFrame):
     with st.sidebar:
         st.markdown("### ⚙️ Pengaturan Peta")
         vis_mode = st.radio("Tampilan", ["Titik dengan Profil", "Heatmap"], horizontal=True, key="map_vis_mode")
+
+        # pusat peta: daftar kabupaten (fix) untuk center & zoom
         kabupaten_coords = {
             "Batang Hari": (-1.70, 103.08), "Bungo": (-1.60, 102.13), "Kerinci": (-2.18, 101.50),
             "Merangin": (-2.08, 101.4747), "Muaro Jambi": (-1.73, 103.61), "Sarolangun": (-2.30, 102.70),
             "Tanjung Jabung Barat": (-0.79, 103.46), "Tanjung Jabung Timur": (-1.20, 103.90),
             "Tebo": (-1.490917, 102.445194), "Kota Jambi": (-1.61, 103.61), "Kota Sungai Penuh": (-2.06, 101.39),
         }
-        opt_center = st.selectbox("Pilih Kabupaten/Kota", ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()), index=0, key="map_center")
+        opt_center = st.selectbox("Pusat peta (kab/kota)", ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()),
+                                  index=0, key="map_center")
         radius_km  = st.slider("Radius (km)", 5, 200, 50, step=5, key="map_radius_km")
         no_rerun   = st.checkbox("Jangan rerun saat gerak peta", value=True, key="map_quiet")
+
+        # Filter berdasarkan atribut pada DATA
+        st.markdown("### 🔎 Filter Data")
+        # kabupaten pada DATA (bila ada kolomnya)
+        if kab_data_col:
+            vals = sorted([v for v in df[kab_data_col].dropna().astype(str).unique() if v.strip() != ""])
+            sel_kab = st.multiselect("Filter kabupaten (DATA)", vals, default=[], key="flt_kab")
+        else:
+            sel_kab = []
+        # STO
+        if sto_col:
+            vals = sorted([v for v in df[sto_col].dropna().astype(str).unique() if v.strip() != ""])
+            sel_sto = st.multiselect("Filter STO", vals, default=[], key="flt_sto")
+        else:
+            sel_sto = []
+        # Sektor
+        if sektor_col:
+            vals = sorted([v for v in df[sektor_col].dropna().astype(str).unique() if v.strip() != ""])
+            sel_sek = st.multiselect("Filter Sektor", vals, default=[], key="flt_sek")
+        else:
+            sel_sek = []
+
         col_btn_a, col_btn_b = st.columns(2)
         with col_btn_a:
             apply_btn = st.button("Terapkan filter", key="map_apply")
@@ -137,7 +171,7 @@ def tampilkan_peta(df: pd.DataFrame):
     if "radius_km" not in st.session_state:
         st.session_state["radius_km"] = radius_km
 
-    # terapkan pilihan pusat
+    # terapkan pilihan pusat peta
     if opt_center != "(Gunakan tengah data)":
         center_lat, center_lon = kabupaten_coords[opt_center]
         radius_deg = 0.5
@@ -159,27 +193,40 @@ def tampilkan_peta(df: pd.DataFrame):
         st.session_state["fix_center"] = (df[lat_col].mean(), df[lon_col].mean())
         st.session_state["show_filtered"] = False
         st.session_state["radius_km"] = 50
+        st.session_state["flt_kab"] = []
+        st.session_state["flt_sto"] = []
+        st.session_state["flt_sek"] = []
+
+    # ====== siapkan data plotting ======
+    subset_cols = [lat_col, lon_col]
+    for c in [tgl_col, status_col, sto_col, sektor_col, kab_data_col]:
+        if c: subset_cols.append(c)
+    data_valid = df[subset_cols].dropna(subset=[lat_col, lon_col])
+
+    # terapkan FILTER DATA (atribut)
+    if kab_data_col and st.session_state.get("flt_kab"):
+        data_valid = data_valid[data_valid[kab_data_col].astype(str).isin(st.session_state["flt_kab"])]
+    if sto_col and st.session_state.get("flt_sto"):
+        data_valid = data_valid[data_valid[sto_col].astype(str).isin(st.session_state["flt_sto"])]
+    if sektor_col and st.session_state.get("flt_sek"):
+        data_valid = data_valid[data_valid[sektor_col].astype(str).isin(st.session_state["flt_sek"])]
+
+    # terapkan FILTER RADIUS jika aktif
+    if st.session_state["show_filtered"]:
+        fc_lat, fc_lon = st.session_state["fix_center"]
+        deg = st.session_state["radius_km"] / 111.0
+        data_valid = data_valid[
+            (data_valid[lat_col].between(fc_lat - deg, fc_lat + deg)) &
+            (data_valid[lon_col].between(fc_lon - deg, fc_lon + deg))
+        ]
 
     # ====== render peta ======
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start, width="100%", height=500)
 
-    subset_cols = [lat_col, lon_col]
-    for c in [tgl_col, status_col, sto_col, sektor_col]:
-        if c: subset_cols.append(c)
-    data_valid = df[subset_cols].dropna(subset=[lat_col, lon_col])
-
     if vis_mode == "Titik dengan Profil":
-        data_plot = data_valid
-        if st.session_state["show_filtered"]:
-            fc_lat, fc_lon = st.session_state["fix_center"]
-            deg = st.session_state["radius_km"] / 111.0
-            data_plot = data_plot[
-                (data_plot[lat_col].between(fc_lat - deg, fc_lat + deg)) &
-                (data_plot[lon_col].between(fc_lon - deg, fc_lon + deg))
-            ]
         cluster = MarkerCluster().add_to(m)
         shown = 0
-        for _, row in data_plot.iterrows():
+        for _, row in data_valid.iterrows():
             if st.session_state["show_filtered"]:
                 jarak = haversine(st.session_state["fix_center"][0], st.session_state["fix_center"][1],
                                   row[lat_col], row[lon_col])
@@ -201,14 +248,10 @@ def tampilkan_peta(df: pd.DataFrame):
                           popup=popup_html,
                           icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
             shown += 1
-
-        if st.session_state["show_filtered"]:
-            st.caption(
-                f"Menampilkan {shown} titik dalam radius {st.session_state['radius_km']} km "
-                f"dari pusat {tuple(round(x, 5) for x in st.session_state['fix_center'])}"
-            )
-        else:
-            st.caption(f"Menampilkan {shown} titik.")
+        st.caption(f"Menampilkan {shown} titik" + (
+            f" dalam radius {st.session_state['radius_km']} km dari {tuple(round(x,5) for x in st.session_state['fix_center'])}"
+            if st.session_state["show_filtered"] else ""
+        ))
     else:
         heat_data = data_valid[[lat_col, lon_col]].values.tolist()
         if heat_data:
