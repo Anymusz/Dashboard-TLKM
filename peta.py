@@ -187,7 +187,7 @@ def tampilkan_peta(df: pd.DataFrame):
                       icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
         shown += 1
 
-    st.caption(f"Menampilkan {shown}.")
+    st.caption(f"Menampilkan {shown} titik.")
 
     # HTML folium statis → drag/zoom tidak memicu rerun
     html = m.get_root().render()
