@@ -47,39 +47,24 @@ def _parse_coord_cell(txt):
 
 # —— NORMALISASI ANGKA KOORDINAT (kebal format Eropa) ——
 def _coerce_coord(val: object, kind: str) -> float | None:
-    """
-    Bersihkan angka koordinat dari berbagai format:
-    - '1.037.952.395' -> 103.7952395  (titik ribuan dihapus, skala dikoreksi)
-    - '-1,2148376'    -> -1.2148376   (koma sebagai desimal)
-    - Buang simbol non-digit, spasi, dsb.
-    kind: 'lat' | 'lon' untuk batas validasi (90 vs 180).
-    """
     if val is None:
         return None
     s = str(val).strip()
     if not s or s.lower() in ("nan", "none", "null", "-"):
         return None
-
-    # Jika ada koma, asumsikan koma=desimal ⇒ hapus semua titik (ribuan) lalu ganti koma→titik
     if "," in s:
         s = s.replace(".", "")
         s = s.replace(",", ".")
     else:
-        # Tidak ada koma. Jika titik >1 (ribuan), hapus semua titik
         if s.count(".") > 1:
             s = s.replace(".", "")
-
-    # Sisakan hanya tanda +/- dan titik desimal
     s = re.sub(r"[^0-9\.\-\+]", "", s)
     if s in ("", "+", "-"):
         return None
-
     try:
         v = float(s)
     except Exception:
         return None
-
-    # Koreksi skala bila di luar rentang wajar (akibat ribuan)
     limit = 90.0 if kind == "lat" else 180.0
     while abs(v) > limit and abs(v) > 0:
         v /= 10.0
@@ -125,10 +110,10 @@ def tampilkan_peta(df: pd.DataFrame):
     lat_col = _pick_col_fuzzy(df, "lat")
     lon_col = _pick_col_fuzzy(df, "lon")
 
-    tgl_col    = next((c for c in df.columns if "tanggal" in c or "date" in c or c in ["tgl","waktu"]), None)
-    status_col = next((c for c in df.columns if "status" in c or c in ["status sc","status_sc","keterangan","info"]), None)
+    tgl_col    = next((c for c in df.columns if ("tanggal" in c) or ("date" in c) or (c in ["tgl","waktu"])), None)
+    status_col = next((c for c in df.columns if ("status" in c) or (c in ["status sc","status_sc","keterangan","info"])), None)
     sto_col    = next((c for c in df.columns if "sto" in c), None)
-    sektor_col = next((c for c in df.columns if "sektor" in c or "sector" in c), None)
+    sektor_col = next((c for c in df.columns if ("sektor" in c) or ("sector" in c)), None)
 
     if not lat_col or not lon_col:
         st.warning("Tidak ada lat/lon yang valid."); st.dataframe(df.head(10)); return
@@ -168,20 +153,21 @@ def tampilkan_peta(df: pd.DataFrame):
 
     # ====== CENTER & ZOOM ======
     if opt_center != "(Gunakan tengah data)":
-        center_lat, center_lon = kabupaten_coords[opt_center]; zoom_start = 11
+        # Center manual ke kabupaten/kota terpilih
+        center_lat, center_lon = kabupaten_coords[opt_center]
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
     else:
+        # Fokus Jambi (tanpa fit_bounds)
         if not data_valid.empty:
-            center_lat = data_valid[lat_col].mean()
-            center_lon = data_valid[lon_col].mean()
+            center_lat = float(data_valid[lat_col].median())
+            center_lon = float(data_valid[lon_col].median())
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=8)
         else:
-            # fallback Jambi
-            center_lat, center_lon = (-1.61, 103.61)
-        zoom_start = 7
+            # fallback: langsung ke Kota Jambi
+            m = folium.Map(location=[-1.61, 103.61], zoom_start=8)
 
     # ====== render peta: MarkerCluster selalu ======
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
     cluster = MarkerCluster().add_to(m)
-
     shown = 0
     for _, row in data_valid.iterrows():
         tanggal_val = row.get(tgl_col, "N/A") if tgl_col else "N/A"
@@ -201,7 +187,7 @@ def tampilkan_peta(df: pd.DataFrame):
                       icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
         shown += 1
 
-    st.caption(f"Menampilkan {shown} titik (koordinat valid setelah pembersihan).")
+    st.caption(f"Menampilkan {shown} titik (pusat & zoom diarahkan ke Jambi).")
 
     # HTML folium statis → drag/zoom tidak memicu rerun
     html = m.get_root().render()
