@@ -68,9 +68,50 @@ def _parse_coord_cell(txt):
 
     return (None, None)
 
+# —— NORMALISASI ANGKA KOORDINAT (kebal format Eropa) ——
+def _coerce_coord(val: object, kind: str) -> float | None:
+    """
+    Bersihkan angka koordinat dari berbagai format:
+    - '1.037.952.395' -> 103.7952395  (titik ribuan dihapus, skala dikoreksi)
+    - '-1,2148376'    -> -1.2148376   (koma sebagai desimal)
+    - Buang simbol non-digit, spasi, dsb.
+    kind: 'lat' | 'lon' untuk batas validasi (90 vs 180).
+    """
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("nan", "none", "null", "-"):
+        return None
+
+    # Jika ada koma, asumsikan koma=desimal ⇒ hapus semua titik (ribuan) lalu ganti koma→titik
+    if "," in s:
+        s = s.replace(".", "")
+        s = s.replace(",", ".")
+    else:
+        # Tidak ada koma. Jika titik >1 (ribuan), hapus semua titik
+        if s.count(".") > 1:
+            s = s.replace(".", "")
+
+    # Sisakan hanya tanda +/- dan titik desimal
+    s = re.sub(r"[^0-9\.\-\+]", "", s)
+    if s in ("", "+", "-"):
+        return None
+
+    try:
+        v = float(s)
+    except Exception:
+        return None
+
+    # Koreksi skala bila di luar rentang wajar (akibat ribuan)
+    limit = 90.0 if kind == "lat" else 180.0
+    while abs(v) > limit and abs(v) > 0:
+        v /= 10.0
+
+    return v
+
 def _split_single_coord_column(df):
     """Deteksi 1 kolom gabungan koordinat dan pecah jadi lat/lon."""
-    if {"lat","lon"}.issubset(df.columns): 
+    if {"lat","lon"}.issubset(df.columns):
         return df
     cand_names = [c for c in df.columns if any(k in c for k in [
         "koordinat","coord","coordinate","latlon","tikor","lokasi","geotag","geom","geo","maps","map"
@@ -92,6 +133,7 @@ def _split_single_coord_column(df):
 
 # ---------- Util ----------
 def _read_csv_any_sep(file):
+    # engine="python" dengan sep=None akan auto-deteksi delimiter (`,`/`;`/tab`)
     return pd.read_csv(file, sep=None, engine="python")
 
 def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
@@ -104,17 +146,22 @@ def _normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     }
     df = df.rename(columns={c: rename_map.get(c, c) for c in df.columns})
 
-    # 🔽 tambahkan pecah kolom gabungan
+    # 🔽 pecah kolom gabungan jika ada
     df = _split_single_coord_column(df)
 
-    for col in ("lat", "lon"):
-        if col in df.columns and df[col].dtype == object:
-            df[col] = (
-                df[col].astype(str)
-                    .str.replace(",", ".", regex=False)
-                    .str.replace(r"[^0-9\.\-]", "", regex=True)
-            )
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+    # 🔽 pembersihan kuat untuk lat/lon (tahan format Eropa)
+    if "lat" in df.columns:
+        df["lat"] = df["lat"].map(lambda v: _coerce_coord(v, "lat"))
+    if "lon" in df.columns:
+        df["lon"] = df["lon"].map(lambda v: _coerce_coord(v, "lon"))
+
+    # 🔁 heuristik bila kolom ketuker (sering terjadi: lat ≈100, lon ≈-1..-2)
+    if {"lat","lon"}.issubset(df.columns):
+        lat_med = pd.to_numeric(pd.Series(df["lat"]), errors="coerce").abs().median()
+        lon_med = pd.to_numeric(pd.Series(df["lon"]), errors="coerce").abs().median()
+        if pd.notna(lat_med) and pd.notna(lon_med) and (lat_med > 90 and lon_med < 60):
+            df["lat"], df["lon"] = df["lon"], df["lat"]
+
     return df
 
 def _fmt_int(n):
