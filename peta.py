@@ -45,6 +45,46 @@ def _parse_coord_cell(txt):
         except: return (None, None)
     return (None, None)
 
+# —— NORMALISASI ANGKA KOORDINAT (kebal format Eropa) ——
+def _coerce_coord(val: object, kind: str) -> float | None:
+    """
+    Bersihkan angka koordinat dari berbagai format:
+    - '1.037.952.395' -> 103.7952395  (titik ribuan dihapus, skala dikoreksi)
+    - '-1,2148376'    -> -1.2148376   (koma sebagai desimal)
+    - Buang simbol non-digit, spasi, dsb.
+    kind: 'lat' | 'lon' untuk batas validasi (90 vs 180).
+    """
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("nan", "none", "null", "-"):
+        return None
+
+    # Jika ada koma, asumsikan koma=desimal ⇒ hapus semua titik (ribuan) lalu ganti koma→titik
+    if "," in s:
+        s = s.replace(".", "")
+        s = s.replace(",", ".")
+    else:
+        # Tidak ada koma. Jika titik >1 (ribuan), hapus semua titik
+        if s.count(".") > 1:
+            s = s.replace(".", "")
+
+    # Sisakan hanya tanda +/- dan titik desimal
+    s = re.sub(r"[^0-9\.\-\+]", "", s)
+    if s in ("", "+", "-"):
+        return None
+
+    try:
+        v = float(s)
+    except Exception:
+        return None
+
+    # Koreksi skala bila di luar rentang wajar (akibat ribuan)
+    limit = 90.0 if kind == "lat" else 180.0
+    while abs(v) > limit and abs(v) > 0:
+        v /= 10.0
+    return v
+
 def _pick_col_fuzzy(df, want="lat"):
     candidates_exact = {
         "lat": ["lat", "latitude", "y", "koordinat_y", "coord_y"],
@@ -93,6 +133,17 @@ def tampilkan_peta(df: pd.DataFrame):
     if not lat_col or not lon_col:
         st.warning("Tidak ada lat/lon yang valid."); st.dataframe(df.head(10)); return
 
+    # --- Bersihkan & validasi koordinat (sama seperti di app.py) ---
+    df[lat_col] = df[lat_col].map(lambda v: _coerce_coord(v, "lat"))
+    df[lon_col] = df[lon_col].map(lambda v: _coerce_coord(v, "lon"))
+
+    # Heuristik swap bila ketuker
+    lat_med = pd.Series(df[lat_col], dtype="float").abs().median(skipna=True)
+    lon_med = pd.Series(df[lon_col], dtype="float").abs().median(skipna=True)
+    if pd.notna(lat_med) and pd.notna(lon_med) and (lat_med > 90 and lon_med < 60):
+        df[lat_col], df[lon_col] = df[lon_col], df[lat_col]
+
+    # Pastikan numeric
     df[lat_col] = pd.to_numeric(df[lat_col], errors="coerce")
     df[lon_col] = pd.to_numeric(df[lon_col], errors="coerce")
 
@@ -109,20 +160,28 @@ def tampilkan_peta(df: pd.DataFrame):
                                   ["(Gunakan tengah data)"] + list(kabupaten_coords.keys()),
                                   index=0, key="map_center")
 
-    # ====== CENTER & ZOOM ======
-    if opt_center != "(Gunakan tengah data)":
-        center_lat, center_lon = kabupaten_coords[opt_center]; zoom_start = 11
-    else:
-        center_lat = df[lat_col].mean(); center_lon = df[lon_col].mean(); zoom_start = 7
-
-    # ====== render peta: MarkerCluster selalu ======
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
+    # ====== FILTER DATA VALID ======
     subset_cols = [lat_col, lon_col]
     for c in [tgl_col, status_col, sto_col, sektor_col]:
         if c: subset_cols.append(c)
     data_valid = df[subset_cols].dropna(subset=[lat_col, lon_col])
 
+    # ====== CENTER & ZOOM ======
+    if opt_center != "(Gunakan tengah data)":
+        center_lat, center_lon = kabupaten_coords[opt_center]; zoom_start = 11
+    else:
+        if not data_valid.empty:
+            center_lat = data_valid[lat_col].mean()
+            center_lon = data_valid[lon_col].mean()
+        else:
+            # fallback Jambi
+            center_lat, center_lon = (-1.61, 103.61)
+        zoom_start = 7
+
+    # ====== render peta: MarkerCluster selalu ======
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom_start)
     cluster = MarkerCluster().add_to(m)
+
     shown = 0
     for _, row in data_valid.iterrows():
         tanggal_val = row.get(tgl_col, "N/A") if tgl_col else "N/A"
@@ -142,7 +201,7 @@ def tampilkan_peta(df: pd.DataFrame):
                       icon=folium.Icon(color="red", icon="info-sign")).add_to(cluster)
         shown += 1
 
-    st.caption(f"Menampilkan {shown} titik.")
+    st.caption(f"Menampilkan {shown} titik (koordinat valid setelah pembersihan).")
 
     # HTML folium statis → drag/zoom tidak memicu rerun
     html = m.get_root().render()
